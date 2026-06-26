@@ -1,0 +1,1 @@
+//! attr DOM module placeholder.

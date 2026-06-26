@@ -1,0 +1,9 @@
+[package]
+name = "nautile-headless"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nautile_browser_core = { path = "../../crates/nautile_browser_core" }
+nautile_common = { path = "../../crates/nautile_common" }

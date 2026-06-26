@@ -1,156 +1,60 @@
 [workspace]
 resolver = "2"
-
 members = [
-    # Applications
-    "apps/browser-desktop",
-    "apps/browser-headless",
-    "apps/browser-test-runner",
-    "apps/devtools",
-
-    # Browser core
-    "crates/browser_core",
-    "crates/browser_ui",
-    "crates/ipc_core",
-    "crates/process_manager",
-
-    # Réseau
-    "crates/net_url",
-    "crates/net_dns",
-    "crates/net_tls",
-    "crates/net_http",
-    "crates/net_http2",
-    "crates/net_http3",
-    "crates/net_cache",
-    "crates/net_cookies",
-    "crates/net_fetch",
-    "crates/net_websocket",
-
-    # HTML
-    "crates/html_tokenizer",
-    "crates/html_tree_builder",
-    "crates/html_parser",
-    "crates/html_encoding",
-    "crates/html_entities",
-
-    # DOM
-    "crates/dom_core",
-    "crates/dom_events",
-    "crates/dom_html",
-    "crates/dom_shadow",
-    "crates/dom_custom_elements",
-    "crates/dom_bindings",
-
-    # CSS
-    "crates/css_syntax",
-    "crates/css_selectors",
-    "crates/css_values",
-    "crates/css_cascade",
-    "crates/css_media",
-    "crates/css_fonts",
-    "crates/css_animations",
-    "crates/cssom",
-
-    # Style
-    "crates/style_engine",
-
-    # Layout
-    "crates/layout_core",
-    "crates/layout_block",
-    "crates/layout_inline",
-    "crates/layout_flex",
-    "crates/layout_grid",
-    "crates/layout_table",
-    "crates/layout_text",
-
-    # Paint / Rendu
-    "crates/paint",
-    "crates/compositor",
-    "crates/gpu_backend",
-    "crates/raster",
-    "crates/image_decode",
-    "crates/font",
-    "crates/text_shaping",
-
-    # Moteur JavaScript
-    "crates/js_lexer",
-    "crates/js_parser",
-    "crates/js_ast",
-    "crates/js_bytecode",
-    "crates/js_vm",
-    "crates/js_gc",
-    "crates/js_runtime",
-    "crates/js_objects",
-    "crates/js_builtins",
-    "crates/js_modules",
-    "crates/js_regex",
-    "crates/js_jit",
-
-    # Bindings JS <-> Web
-    "crates/bindings_webidl",
-    "crates/bindings_dom",
-    "crates/bindings_html",
-    "crates/bindings_cssom",
-    "crates/bindings_canvas",
-    "crates/bindings_fetch",
-
-    # Web APIs
-    "crates/webapi_console",
-    "crates/webapi_timers",
-    "crates/webapi_fetch",
-    "crates/webapi_storage",
-    "crates/webapi_canvas",
-    "crates/webapi_workers",
-    "crates/webapi_service_worker",
-    "crates/webapi_websocket",
-    "crates/webapi_performance",
-    "crates/webapi_permissions",
-
-    # Stockage
-    "crates/storage_core",
-    "crates/storage_indexeddb",
-    "crates/storage_local",
-    "crates/storage_history",
-    "crates/storage_bookmarks",
-
-    # Sécurité
-    "crates/security_origin",
-    "crates/security_csp",
-    "crates/security_cors",
-    "crates/security_permissions",
-    "crates/security_sandbox",
-
-    # Event loop
-    "crates/event_loop",
-    "crates/task_queue",
-    "crates/scheduler",
-
-    # DevTools
-    "crates/devtools_protocol",
-    "crates/devtools_agent",
-    "crates/devtools_dom",
-    "crates/devtools_network",
-    "crates/devtools_console",
-
-    # Commun / Plateforme
-    "crates/common",
-    "crates/platform",
+    "apps/nautile-desktop", "apps/nautile-headless", "apps/nautile-test-runner", "apps/nautile-devtools",
+    "crates/winit", "crates/wgpu",
+    "crates/nautile_common",
+    "crates/nautile_platform",
+    "crates/nautile_browser_core",
+    "crates/nautile_browser_ui",
+    "crates/nautile_ipc",
+    "crates/nautile_process",
+    "crates/nautile_url",
+    "crates/nautile_net",
+    "crates/nautile_http",
+    "crates/nautile_fetch",
+    "crates/nautile_cache",
+    "crates/nautile_cookies",
+    "crates/nautile_websocket",
+    "crates/nautile_loader",
+    "crates/nautile_html",
+    "crates/nautile_dom",
+    "crates/nautile_dom_events",
+    "crates/nautile_css",
+    "crates/nautile_style",
+    "crates/nautile_layout",
+    "crates/nautile_paint",
+    "crates/nautile_compositor",
+    "crates/nautile_gpu",
+    "crates/nautile_image",
+    "crates/nautile_font",
+    "crates/nautile_js_lexer",
+    "crates/nautile_js_parser",
+    "crates/nautile_js_ast",
+    "crates/nautile_js_bytecode",
+    "crates/nautile_js_vm",
+    "crates/nautile_js_gc",
+    "crates/nautile_js_runtime",
+    "crates/nautile_js_objects",
+    "crates/nautile_js_builtins",
+    "crates/nautile_js_modules",
+    "crates/nautile_js_regex",
+    "crates/nautile_js_jit",
+    "crates/nautile_bindings",
+    "crates/nautile_webapi",
+    "crates/nautile_event_loop",
+    "crates/nautile_storage",
+    "crates/nautile_security",
+    "crates/nautile_devtools_protocol",
+    "crates/nautile_devtools_agent",
+    "crates/nautile_devtools_dom",
+    "crates/nautile_devtools_network",
+    "crates/nautile_devtools_console",
+    "crates/nautile_testing",
 ]
-
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Arthur Bouchaud"]
+authors = ["Nautile contributors"]
 license = "MIT"
-repository = "https://github.com/bcharthur/nautile-navigateur"
 
-[profile.dev]
-opt-level = 0
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-
-[profile.test]
-opt-level = 1
