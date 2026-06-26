@@ -1,0 +1,1 @@
+//! Compositor module placeholder.

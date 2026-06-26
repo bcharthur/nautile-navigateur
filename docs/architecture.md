@@ -1,63 +1,19 @@
-# Architecture Nautile
+# Architecture de Nautile Navigateur
 
-## Vue d'ensemble
+Nautile vise un navigateur Web complet écrit en Rust, sans WebView ni moteur externe. Le code est découpé en crates `nautile_*` pour isoler les responsabilités : shell, browser core, navigation, réseau, loaders, HTML, DOM, CSS, style, layout, paint, compositor, GPU, JavaScript, Web APIs, event loop, stockage, sécurité, IPC/process et DevTools.
 
-Nautile est un navigateur web complet, développé en Rust, organisé en workspace multi-crates.
+## Pipeline navigation/rendu
 
-## Processus
+URL saisie → Browser UI → Browser Core → NavigationController → NetworkService/DocumentLoader → HTML tokenizer/tree builder → DOM tree → CSS parser → selector matching/cascade → computed style tree → layout tree → fragment tree → display list → paint chunks → layer tree → compositor frame → `wgpu` surface.
 
-```
-browser process
-├── network service process
-├── gpu process
-├── storage process
-├── renderer process (1 par site)
-└── utility process
-```
+## Pipeline JavaScript dynamique
 
-## Moteurs
+Script/event handler → JS lexer/parser → AST → bytecode compiler → VM/runtime → DOM bindings → mutation DOM → invalidation style/layout/paint → frame scheduler → compositor.
 
-| Moteur | Crates | Rôle |
-|--------|--------|------|
-| Réseau | net_* | HTTP, TLS, DNS, cache, cookies |
-| HTML | html_* | Tokenizer, tree builder |
-| DOM | dom_* | Document, nodes, events, shadow DOM |
-| CSS | css_* + style_engine | Parse, cascade, computed styles |
-| Layout | layout_* | Block, flex, grid, inline, text |
-| Paint | paint | Display list, stacking contexts |
-| Compositor | compositor | Layers, raster, GPU frames |
-| JavaScript | js_* | Lexer → parser → AST → bytecode → VM → GC |
-| Bindings | bindings_* | Pont JS <-> DOM/Web APIs |
-| Web APIs | webapi_* | console, timers, fetch, workers… |
-| Stockage | storage_* | IndexedDB, localStorage, cookies, cache |
-| Sécurité | security_* | Origin, CSP, CORS, sandbox |
-| IPC | ipc_core | Messages inter-processus |
-| DevTools | devtools_* | Inspection DOM, réseau, console |
+## Pipeline input
 
-## Pipeline de rendu
+`winit` event → événement plateforme → routage Browser Core → hit testing layout/compositor → focus manager → DOM event target → capture/target/bubble → JS listeners → mutation éventuelle → rendering update.
 
-```
-URL
-→ réseau (net_fetch)
-→ HTML parser (html_parser)
-→ DOM (dom_core)
-→ CSS parser (css_syntax + css_cascade)
-→ Style engine (style_engine)
-→ Layout (layout_core + layout_block/flex/grid/inline)
-→ Paint (paint)
-→ Compositor (compositor)
-→ GPU (gpu_backend)
-→ Écran
-```
+## Process model
 
-## Event loop
-
-```
-1. Tâche (task_queue)
-2. Microtâches (promises, MutationObserver)
-3. Recalcul style si dirty
-4. Layout si dirty
-5. Paint si dirty
-6. requestAnimationFrame callbacks
-7. Composite + présentation frame
-```
+V0 fonctionne en single-process avec des frontières IPC déjà nommées. La cible sépare browser, renderer par site/origin, network, GPU, storage, utility et DevTools processes avec messages sérialisables et crash recovery.
