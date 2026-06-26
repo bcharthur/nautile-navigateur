@@ -1,5 +1,6 @@
 use crate::{cli::Cli, window::GpuWindow};
 use nautile_browser_core::{Browser, BrowserConfig};
+use nautile_common::version;
 use nautile_event_loop::WebEventLoop;
 use std::error::Error;
 use winit::{
@@ -8,12 +9,18 @@ use winit::{
     keyboard::{Key, NamedKey},
     window::WindowBuilder,
 };
+
+const LINE_SCROLL_PX: f32 = 40.0;
+
 /// Runs the desktop shell.
 pub fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
+    if cli.print_version {
+        println!("{}", Cli::version_text());
+        return Ok(());
+    }
     let event_loop = EventLoop::new()?;
-    let window = WindowBuilder::new()
-        .with_title("Nautile Navigateur")
-        .build(&event_loop)?;
+    let title = version::browser_version_string();
+    let window = WindowBuilder::new().with_title(&title).build(&event_loop)?;
     let mut browser = Browser::new(BrowserConfig::default());
     let tab = browser.create_tab();
     browser.navigate_tab(tab, cli.url)?;
@@ -42,26 +49,31 @@ pub fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 WindowEvent::CursorMoved { .. } => web_loop.input("mouse move"),
                 WindowEvent::MouseInput { .. } => web_loop.input("mouse button"),
                 WindowEvent::MouseWheel { delta, .. } => {
-                    let label = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => format!("scroll lines {y}"),
-                        MouseScrollDelta::PixelDelta(p) => format!("scroll pixels {}", p.y),
-                    };
-                    web_loop.input(label);
+                    let (dx, dy) = scroll_delta_to_css_px(delta);
+                    web_loop.scroll_by(dx, dy);
+                    window.request_redraw();
                 }
                 WindowEvent::RedrawRequested => {
                     web_loop.render_tick();
-                    match gpu.render() {
+                    match gpu.render(web_loop.scroll.y) {
                         Ok(()) => {}
                         Err(wgpu::SurfaceError::Lost) => gpu.resize(window.inner_size()),
                         Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
                         Err(_) => {}
                     }
                 }
-                _ => {}
+                WindowEvent::Other => {}
             },
             Event::AboutToWait => window.request_redraw(),
             _ => {}
         }
     })?;
     Ok(())
+}
+
+fn scroll_delta_to_css_px(delta: MouseScrollDelta) -> (f32, f32) {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) => (-x * LINE_SCROLL_PX, -y * LINE_SCROLL_PX),
+        MouseScrollDelta::PixelDelta(p) => (-p.x as f32, -p.y as f32),
+    }
 }

@@ -1,5 +1,5 @@
 use crate::{NavigationRequest, Profile, Tab};
-use nautile_common::{ids::TabId, Result};
+use nautile_common::{ids::TabId, version, Result};
 /// Configuration used to create a browser instance.
 #[derive(Debug, Clone)]
 pub struct BrowserConfig {
@@ -10,8 +10,8 @@ pub struct BrowserConfig {
 impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
-            product_name: "Nautile Navigateur".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
+            product_name: version::PRODUCT_NAME.into(),
+            version: version::NAUTILE_VERSION.into(),
             headless: false,
         }
     }

@@ -80,6 +80,7 @@ pub mod event {
         MouseInput {},
         MouseWheel { delta: MouseScrollDelta },
         RedrawRequested,
+        Other,
     }
     #[derive(Debug, Clone)]
     pub enum Event {

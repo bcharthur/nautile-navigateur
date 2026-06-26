@@ -61,7 +61,7 @@ impl<'w> GpuWindow<'w> {
             self.surface.configure(&self.device, &self.config);
         }
     }
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, scroll_y: f32) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -79,7 +79,7 @@ impl<'w> GpuWindow<'w> {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
+                            r: 0.02 + ((scroll_y as f64 / 4000.0) % 0.08),
                             g: 0.04,
                             b: 0.07,
                             a: 1.0,
