@@ -1,21 +1,20 @@
-﻿# Nautile
+# Nautile Navigateur
 
-Navigateur web souverain francais - moteur embarque no_std concu pour Bouchaud OS.
+Nautile Navigateur est un navigateur Web écrit from scratch en Rust. La base actuelle pose un workspace Cargo multi-crates, un shell desktop `winit`/`wgpu`, un mode headless, et des frontières stables pour HTML, DOM, CSS, style, layout, paint, compositor, JavaScript, Web APIs, stockage, sécurité, IPC, DevTools et tests.
 
-## Architecture
+## Commandes
 
-- browser/mod.rs    - BrowserState, API publique
-- browser/state.rs  - onglets, historique, session JS
-- browser/pages.rs  - pages internes (about:bouchaud, about:calc, about:wasm)
-- browser/loader.rs - pipeline reseau (HTTP/HTTPS souverain, file:)
-- browser/engine/   - pont vers gui::engine (web, js, image)
-- browser/ui/chrome.rs - chrome complet (onglets, barre d'adresse, evenements)
-- browser/ui/theme.rs  - palette Chrome/Firefox-inspired
+```bash
+cargo check --workspace
+cargo fmt --all
+cargo run -p nautile-headless -- --url about:version --dump
+cargo run -p nautile-desktop -- about:blank
+```
 
-## Integration Bouchaud OS
+## Architecture courte
 
-Dependances OS : crate::net (TLS 1.3), crate::drivers::gfx (framebuffer VBE), linked_list_allocator
+Le pipeline cible est : URL → Browser Core → Navigation → Network/Loader → HTML → DOM → CSS → Style → Layout → Paint → Compositor → GPU. Le pipeline dynamique est : JS → DOM bindings → mutations → invalidation style/layout/paint → frame scheduler. Les inputs suivent : `winit` → platform event → routing navigateur → hit test → DOM event → JS listener.
 
-## Licence
+## Roadmap courte
 
-MIT
+V0 établit le workspace, la fenêtre, l'event loop et les pages `about:`. V1-V5 ajoutent URL/HTTP/HTML/DOM/CSS/Layout/Paint/Compositor. V6-V9 ajoutent JavaScript, bindings DOM, events, forms, fetch, cookies et storage. V10-V14 renforcent layout moderne, multi-process, DevTools, WPT/Test262 et performance.

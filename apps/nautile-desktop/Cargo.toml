@@ -1,0 +1,12 @@
+[package]
+name = "nautile-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+winit = { path = "../../crates/winit" }
+wgpu = { path = "../../crates/wgpu" }
+nautile_browser_core = { path = "../../crates/nautile_browser_core" }
+nautile_common = { path = "../../crates/nautile_common" }
+nautile_event_loop = { path = "../../crates/nautile_event_loop" }
