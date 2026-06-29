@@ -7,7 +7,7 @@
 //!  │ state        │ Onglets, historique, session JS           │
 //!  │ loader       │ Pipeline réseau → HTML → Session + Page  │
 //!  │ pages        │ Pages internes (about:*, calc, wasm…)    │
-//!  │ engine/      │ Pont vers gui::engine (web, js, image)   │
+//!  │ engine/      │ Moteur de rendu (web, js, image, font)   │
 //!  │ ui/theme     │ Palette et constantes visuelles          │
 //!  │ ui/chrome    │ Dessin du chrome + gestion événements    │
 //!  └──────────────┴──────────────────────────────────────────┘
@@ -20,4 +20,12 @@ pub mod pages;
 pub mod state;
 pub mod ui;
 
+mod version {
+    include!(concat!(env!("OUT_DIR"), "/nautile_version.rs"));
+}
+
 pub use state::BrowserState;
+pub use version::{
+    NAUTILE_MERGE_DATE, NAUTILE_MERGE_SHORT, NAUTILE_MERGE_SUBJECT, NAUTILE_SOURCE_DATE,
+    NAUTILE_SOURCE_SHORT,
+};

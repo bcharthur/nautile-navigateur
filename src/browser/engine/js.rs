@@ -145,7 +145,16 @@ fn is_id_part(c: u8) -> bool { c == b'_' || c == b'$' || c.is_ascii_alphanumeric
 fn hexv(c: u8) -> u32 { match c { b'0'..=b'9' => (c - b'0') as u32, b'a'..=b'f' => (c - b'a' + 10) as u32, b'A'..=b'F' => (c - b'A' + 10) as u32, _ => 0 } }
 
 impl<'a> Lexer<'a> {
-    fn new(s: &'a [u8]) -> Lexer<'a> { Lexer { s, i: 0, toks: Vec::new() } }
+    fn new(s: &'a [u8]) -> Lexer<'a> {
+        // Les gros bundles modernes (Google sert facilement >1 Mio de JS)
+        // declenchaient une croissance geometrique de Vec pendant le lexing :
+        // quand le tampon approchait ~10 Mio, le realloc suivant demandait
+        // ~20 Mio contigus et pouvait OOM sur le tas noyau de 48 Mio. On
+        // pre-dimensionne d'apres la taille source pour eviter ce pic de
+        // double-buffer tout en gardant le moteur JS actif.
+        let cap = (s.len() / 4).clamp(256, 300_000);
+        Lexer { s, i: 0, toks: Vec::with_capacity(cap) }
+    }
 
     fn prev_allows_regex(&self) -> bool {
         match self.toks.last() {
@@ -2401,7 +2410,13 @@ fn strip_tags(html: &str) -> String {
 // ============================================================================
 
 const MAX_OUTPUT: usize = 8_000_000;
-const MAX_SCRIPT: usize = 4_000_000;
+// Taille max d'un script execute. Au-dela, le parsing en AST exploserait la
+// memoire (un bundle minifie de 1 Mo -> ~20 Mo d'AST -> OOM sur le tas de 48 Mo)
+// pour un resultat de toute facon inexploitable (SPA modernes). On execute les
+// scripts raisonnables (inline + petites libs) et on ignore les gros bundles.
+const MAX_SCRIPT: usize = 200_000;
+// Budget cumule d'octets de script execute par page (borne memoire + vitesse).
+const MAX_TOTAL_SCRIPT: usize = 700_000;
 
 /// Execute les `<script>` inline sur un DOM partage et renvoie le HTML enrichi :
 /// document.write insere a la position du script, mutations DOM (innerHTML,
@@ -2493,6 +2508,7 @@ fn open_page_inner(html: &[u8], base_url: &str, run: bool) -> (PageCtx, Vec<u8>)
     let mut scripts: Vec<(usize, usize, String)> = Vec::new();
     let mut i = 0usize;
     let mut ran = 0u32;
+    let mut script_bytes = 0usize; // budget cumule d'octets de script executes
     while i < html.len() {
         if starts_ci(&html[i..], b"<script") {
             let outer_start = i;
@@ -2506,28 +2522,46 @@ fn open_page_inner(html: &[u8], base_url: &str, run: bool) -> (PageCtx, Vec<u8>)
             let content_end = find_ci(html, b"</script", content_start).unwrap_or(html.len());
             let outer_end = find_ci(html, b">", content_end).map(|p| p + 1).unwrap_or(html.len());
             let mut wr = String::new();
-            if run && is_js && ran < 400 {
+            // Budget global atteint -> on n'execute plus de script (anti-OOM).
+            let budget_ok = script_bytes < MAX_TOTAL_SCRIPT;
+            if run && is_js && ran < 400 && budget_ok {
                 if is_external {
-                    // <script src="..."> : telecharge (avec cache) et execute.
+                    // <script src="..."> : telecharge (avec cache) et execute, si
+                    // le bundle reste sous le plafond (sinon il ferait exploser le
+                    // tas au parsing pour rien).
                     if let Some(src_url) = tag_attr(header, "src") {
                         let abs = crate::net::http::resolve_location(
                             scheme_of(base_url), host_of(base_url), src_url);
                         if let Some(bytes) = crate::net::fetch_cached(&abs) {
-                            if bytes.len() <= MAX_SCRIPT {
+                            if bytes.len() <= MAX_SCRIPT && script_bytes + bytes.len() <= MAX_TOTAL_SCRIPT {
                                 let code = alloc::string::String::from_utf8_lossy(&bytes);
                                 interp.writes.clear();
-                                let _ = interp.run(&code);
+                                match interp.run(&code) {
+                                    Ok(_) => crate::dlog!(crate::diag::Cat::Js, "script ext {}o OK {}", bytes.len(), abs),
+                                    Err(e) => crate::dlog!(crate::diag::Cat::Err, "script ext {} : {}", abs, e),
+                                }
                                 ran += 1;
+                                script_bytes += bytes.len();
                                 wr = core::mem::take(&mut interp.writes);
+                            } else {
+                                crate::dlog!(crate::diag::Cat::Warn, "script ext ignore ({}o, plafond {}o): {}", bytes.len(), MAX_SCRIPT, abs);
                             }
                         }
                     }
-                } else if content_end > content_start && content_end - content_start <= MAX_SCRIPT {
-                    if let Ok(src) = core::str::from_utf8(&html[content_start..content_end]) {
-                        interp.writes.clear();
-                        let _ = interp.run(src); // erreurs ignorees (le rendu continue)
-                        ran += 1;
-                        wr = core::mem::take(&mut interp.writes);
+                } else if content_end > content_start {
+                    let len = content_end - content_start;
+                    if len <= MAX_SCRIPT && script_bytes + len <= MAX_TOTAL_SCRIPT {
+                        if let Ok(src) = core::str::from_utf8(&html[content_start..content_end]) {
+                            interp.writes.clear();
+                            if let Err(e) = interp.run(src) {
+                                crate::dlog!(crate::diag::Cat::Err, "script inline ({}o) : {}", src.len(), e);
+                            }
+                            ran += 1;
+                            script_bytes += len;
+                            wr = core::mem::take(&mut interp.writes);
+                        }
+                    } else {
+                        crate::dlog!(crate::diag::Cat::Warn, "script inline ignore ({}o, plafond)", len);
                     }
                 }
             }
@@ -2545,6 +2579,8 @@ fn open_page_inner(html: &[u8], base_url: &str, run: bool) -> (PageCtx, Vec<u8>)
         interp.fire_event(-1, "DOMContentLoaded");
         interp.fire_event(-1, "load");
         interp.pump();
+        let budget = if interp.steps >= interp.max_steps { " (BUDGET ATTEINT)" } else { "" };
+        crate::dlog!(crate::diag::Cat::Js, "{} scripts executes, {} steps{}", ran, interp.steps, budget);
     }
     let mut out = interp.dom.rebuild(&scripts);
     if out.len() > MAX_OUTPUT { out.truncate(MAX_OUTPUT); }
