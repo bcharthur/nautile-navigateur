@@ -154,8 +154,49 @@ impl Parser {
 
     fn parse_program(&mut self) -> Result<Vec<Stmt>, String> {
         let mut out = Vec::new();
-        while !matches!(self.peek(), Tok::Eof) { out.push(self.parse_stmt()?); }
+        let mut recovered = 0u32;
+        let mut first_err: Option<String> = None;
+        while !matches!(self.peek(), Tok::Eof) {
+            let start = self.i;
+            match self.parse_stmt() {
+                Ok(s) => out.push(s),
+                Err(e) => {
+                    // Récupération : une seule erreur de syntaxe ne doit pas
+                    // jeter tout un bundle (Google/React font >1 Mo). On saute
+                    // jusqu'à la prochaine frontière de statement et on continue.
+                    if first_err.is_none() { first_err = Some(e); }
+                    if self.i == start { self.i += 1; } // garantit la progression
+                    self.recover_to_stmt_boundary();
+                    recovered += 1;
+                    if recovered > 20_000 { break; }
+                }
+            }
+        }
+        if recovered > 0 {
+            crate::dlog!(crate::diag::Cat::Js, "parser: {} statements ignores (1re erreur: {})",
+                recovered, first_err.as_deref().unwrap_or("?"));
+        }
         Ok(out)
+    }
+
+    // Avance jusqu'au prochain `;` (profondeur 0) ou `}` fermant, en équilibrant
+    // parenthèses/crochets/accolades, pour reprendre le parsing après une erreur.
+    fn recover_to_stmt_boundary(&mut self) {
+        let mut depth = 0i32;
+        while !matches!(self.peek(), Tok::Eof) {
+            let mut stop = false;
+            if let Tok::Punct(p) = self.peek() {
+                match p.as_str() {
+                    "(" | "[" | "{" => depth += 1,
+                    ")" | "]" => { if depth > 0 { depth -= 1; } }
+                    "}" => { if depth == 0 { self.i += 1; return; } depth -= 1; }
+                    ";" => { if depth <= 0 { stop = true; } }
+                    _ => {}
+                }
+            }
+            self.i += 1;
+            if stop { return; }
+        }
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
@@ -938,10 +979,41 @@ impl Interp {
         };
         if opt && matches!(func, Value::Undefined | Value::Null) { return Ok(Value::Undefined); }
         let argv = self.eval_args(args, env)?;
-        self.call(func, this, &argv)
+        let r = self.call(func, this, &argv);
+        // Enrichit le diagnostic "not a function" avec le nom de l'appelé.
+        if let Err(e) = &r {
+            if matches!(e, Value::Str(s) if s.as_str() == "TypeError: not a function") {
+                let nm = match callee {
+                    Expr::Member(_, name, _) => Some(name.clone()),
+                    Expr::Ident(name) => Some(name.clone()),
+                    _ => None,
+                };
+                if let Some(nm) = nm {
+                    return Err(str_val(format!("TypeError: {} is not a function", nm)));
+                }
+            }
+        }
+        r
     }
 
     pub fn call(&mut self, func: Value, this: Value, args: &[Value]) -> Result<Value, Value> {
+        // Fonction liee par Function.prototype.bind : redirige vers la cible
+        // avec le `this` et les arguments pre-lies.
+        if let Value::Obj(o) = &func {
+            let bound = {
+                let b = o.borrow();
+                b.props.get("__bound_target__").cloned().map(|t| (
+                    t,
+                    b.props.get("__bound_this__").cloned().unwrap_or(Value::Undefined),
+                    b.props.get("__bound_args__").and_then(|v| if let Value::Obj(a) = v { a.borrow().arr.clone() } else { None }).unwrap_or_default(),
+                ))
+            };
+            if let Some((target, bthis, bargs)) = bound {
+                let mut all = bargs;
+                all.extend_from_slice(args);
+                return self.call(target, bthis, &all);
+            }
+        }
         // Fonction exportee par un module WebAssembly : route vers le runtime wasm.
         if let Value::Obj(o) = &func {
             let bound = { let b = o.borrow(); match (b.props.get("__wasm_inst__"), b.props.get("__wasm_fn__")) {
@@ -1017,13 +1089,36 @@ impl Interp {
                     drop(b);
                     return Ok(array_prop(name));
                 }
+                // Function.prototype : call / apply / bind / name / length.
+                // Les proprietes propres (fn.foo = ...) restent prioritaires.
+                let (is_fn, own, nparams) = {
+                    let b = obj.borrow();
+                    let np = match &b.call {
+                        Some(Callable::User { def, .. }) => def.params.len(),
+                        _ => 0,
+                    };
+                    (b.call.is_some(), b.props.get(name).cloned(), np)
+                };
+                if let Some(v) = own { return Ok(v); }
+                if is_fn {
+                    match name {
+                        "call" => return Ok(native_val(fn_call)),
+                        "apply" => return Ok(native_val(fn_apply)),
+                        "bind" => return Ok(native_val(fn_bind)),
+                        "length" => return Ok(Value::Num(nparams as f64)),
+                        "name" => return Ok(str_val("")),
+                        "toString" => return Ok(native_val(|_it, _t, _a| Ok(str_val("function () { [native code] }")))),
+                        "prototype" => { let p = new_obj(Obj::plain()); set(o, "prototype", p.clone()); return Ok(p); }
+                        _ => {}
+                    }
+                }
                 let b = obj.borrow();
                 if let Some(v) = b.props.get(name) { return Ok(v.clone()); }
                 drop(b);
                 Ok(object_prop(name))
             }
-            Value::Null => Err(str_val("TypeError: Cannot read properties of null")),
-            Value::Undefined => Err(str_val("TypeError: Cannot read properties of undefined")),
+            Value::Null => Err(str_val(format!("TypeError: Cannot read properties of null (reading '{}')", name))),
+            Value::Undefined => Err(str_val(format!("TypeError: Cannot read properties of undefined (reading '{}')", name))),
             _ => Ok(Value::Undefined),
         }
     }
@@ -1335,6 +1430,17 @@ fn install(it: &mut Interp) {
     set(&doc, "location", { let loc = new_obj(Obj::plain()); set(&loc, "href", str_val("")); set(&loc, "pathname", str_val("/")); loc });
     set(&doc, "dispatchEvent", native_val(|_it, _t, _a| Ok(Value::Bool(true))));
     set(&doc, "hasFocus", native_val(|_it, _t, _a| Ok(Value::Bool(false))));
+    // document.fonts (FontFaceSet) : load() renvoie une promesse resolue.
+    set(&doc, "fonts", {
+        let fonts = new_obj(Obj::plain());
+        set(&fonts, "load", native_val(|_it, _t, _a| Ok(make_resolved_thenable(array_val(Vec::new())))));
+        set(&fonts, "ready", make_resolved_thenable(Value::Undefined));
+        set(&fonts, "add", native_val(|_it, _t, _a| Ok(Value::Undefined)));
+        set(&fonts, "check", native_val(|_it, _t, _a| Ok(Value::Bool(true))));
+        set(&fonts, "addEventListener", native_val(|_it, _t, _a| Ok(Value::Undefined)));
+        set(&fonts, "status", str_val("loaded"));
+        fonts
+    });
     // addEventListener reel : enregistre l'ecouteur (cible document = noeud -1).
     set(&doc, "addEventListener", native_val(|it, _t, a| { let ty = it.to_string(a.get(0).unwrap_or(&Value::Undefined)); if let Some(cb) = a.get(1) { it.listeners.push((-1, ty, cb.clone())); } Ok(Value::Undefined) }));
     set(&doc, "removeEventListener", native_val(|it, _t, a| { let ty = it.to_string(a.get(0).unwrap_or(&Value::Undefined)); it.listeners.retain(|(n, t, _)| !(*n == -1 && t == &ty)); Ok(Value::Undefined) }));
@@ -1460,8 +1566,12 @@ fn install(it: &mut Interp) {
     scope_declare(&g2, "WebAssembly", webassembly);
 
     // Globals fréquemment utilisés par les scripts modernes ----------------
-    // `_` : variable de commodité (lodash/underscore.js ou raccourci Google)
-    scope_declare(&g2, "_", Value::Undefined);
+    // `_` : raccourci Google (window._ = window._ || {}). Objet vide pour que
+    // `_._DumpException = ...` et `_s._DumpException = _._DumpException` marchent.
+    scope_declare(&g2, "_", new_obj(Obj::plain()));
+    // `_s` / `_qs` : namespaces sœurs de `_` chez Google (idem).
+    scope_declare(&g2, "_s", new_obj(Obj::plain()));
+    scope_declare(&g2, "_qs", new_obj(Obj::plain()));
     // performance.now() : temps monotone (stub retourne 0)
     let perf = new_obj(Obj::plain());
     set(&perf, "now", native_val(|_it, _t, _a| Ok(Value::Num(0.0))));
@@ -1648,6 +1758,38 @@ fn install(it: &mut Interp) {
 // ============================================================================
 // Timers, microtaches, URI, Promise, Date, WebAssembly (helpers)
 // ============================================================================
+
+// Function.prototype.call(thisArg, ...args). `this` est la fonction cible.
+fn fn_call(it: &mut Interp, this: Value, a: &[Value]) -> Result<Value, Value> {
+    let this_arg = a.get(0).cloned().unwrap_or(Value::Undefined);
+    let rest = if a.len() > 1 { &a[1..] } else { &[][..] };
+    it.call(this, this_arg, rest)
+}
+
+// Function.prototype.apply(thisArg, argsArray).
+fn fn_apply(it: &mut Interp, this: Value, a: &[Value]) -> Result<Value, Value> {
+    let this_arg = a.get(0).cloned().unwrap_or(Value::Undefined);
+    let args: Vec<Value> = match a.get(1) {
+        Some(Value::Obj(o)) => o.borrow().arr.clone().unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    it.call(this, this_arg, &args)
+}
+
+// Function.prototype.bind(thisArg, ...boundArgs) -> fonction liee. On stocke la
+// cible/this/args ; `Interp::call` redirige les objets ainsi marques.
+fn fn_bind(_it: &mut Interp, this: Value, a: &[Value]) -> Result<Value, Value> {
+    let bound = new_obj(Obj::plain());
+    // Doit etre appelable (typeof === "function") : trampoline neutre.
+    if let Value::Obj(o) = &bound {
+        o.borrow_mut().call = Some(Callable::Native(|_it, _t, _a| Ok(Value::Undefined)));
+    }
+    set(&bound, "__bound_target__", this);
+    set(&bound, "__bound_this__", a.get(0).cloned().unwrap_or(Value::Undefined));
+    let bargs: Vec<Value> = if a.len() > 1 { a[1..].to_vec() } else { Vec::new() };
+    set(&bound, "__bound_args__", array_val(bargs));
+    Ok(bound)
+}
 
 fn native_set_timeout(it: &mut Interp, _t: Value, a: &[Value]) -> Result<Value, Value> {
     if let Some(cb) = a.get(0) {
